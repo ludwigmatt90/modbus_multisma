@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SMA Inverters – Global Settings",
+        "description": "Configure how often Home Assistant should poll your SMA inverter(s). You can add more inverters after the initial setup via the Options menu.",
+        "data": {
+          "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How frequently (in seconds) the integration reads data from each inverter via Modbus TCP. Minimum 10 s."
+        }
+      },
+      "inverter": {
+        "title": "SMA Inverters – Add Inverter",
+        "description": "Enter the Modbus TCP connection details for your SMA inverter. The integration will test the connection before saving.",
+        "data": {
+          "name": "Inverter name",
+          "section": "Section / location (optional)",
+          "host": "Host (IP address or hostname)",
+          "port": "Modbus TCP port",
+          "slave_id": "Modbus slave ID"
+        },
+        "data_description": {
+          "name": "A friendly name shown in the device registry (e.g. 'Rooftop South').",
+          "section": "Optional grouping label (e.g. 'Building A'). Used to uniquely identify the device.",
+          "host": "IP address or hostname of the inverter's Modbus TCP interface.",
+          "port": "Modbus TCP port. SMA default is 502.",
+          "slave_id": "Modbus unit / slave ID. SMA default is 3."
+        }
+      }
+    },
+    "error": {
+      "connection": "Could not connect to the inverter. Check the host, port, and that the inverter is powered on and reachable.",
+      "communication": "Connected but failed to read data. Check the slave ID and that Modbus TCP is enabled on the inverter.",
+      "unknown": "An unexpected error occurred. Check the Home Assistant logs for details."
+    },
+    "abort": {
+      "already_configured": "This inverter entry is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SMA Inverters – Options",
+        "data": {
+          "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How frequently (in seconds) the integration reads data from each inverter. Changes take effect after saving."
+        }
+      }
+    }
+  }
+}

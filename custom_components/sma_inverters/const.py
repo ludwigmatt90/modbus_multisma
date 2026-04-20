@@ -1,31 +1,34 @@
 """Constants for SMA Inverters integration."""
 
+from logging import Logger, getLogger
+
+LOGGER: Logger = getLogger(__package__)
+
 DOMAIN = "sma_inverters"
-PLATFORMS = ["sensor"]
+ATTRIBUTION = "Data provided by SMA Solar inverters via Modbus TCP"
 
-CONF_MQTT_HOST = "mqtt_host"
-CONF_MQTT_PORT = "mqtt_port"
-CONF_MQTT_USER = "mqtt_user"
-CONF_MQTT_PASS = "mqtt_pass"
-CONF_READ_INTERVAL = "read_interval"
-CONF_WRITE_INTERVAL = "write_interval"
+# Config keys
 CONF_INVERTERS = "inverters"
-CONF_RATE_LIMITS = "rate_limits"
+CONF_HOST = "host"
+CONF_PORT = "port"
+CONF_SLAVE_ID = "slave_id"
+CONF_SCAN_INTERVAL = "scan_interval"
 
-DEFAULT_MQTT_PORT = 1883
-DEFAULT_READ_INTERVAL = 10
-DEFAULT_WRITE_INTERVAL = 60
+# Inverter config keys
+CONF_INVERTER_NAME = "name"
+CONF_INVERTER_SECTION = "section"
+CONF_INVERTER_HOST = "host"
+CONF_INVERTER_PORT = "port"
+CONF_INVERTER_SLAVE_ID = "slave_id"
 
-MODBUS_SLAVE_ID = 3
-REG_TOTAL_ENERGY_START = 30529
-REG_SETPOINT = 40016
+# Defaults
+DEFAULT_PORT = 502
+DEFAULT_SLAVE_ID = 3
+DEFAULT_SCAN_INTERVAL = 30  # seconds
 
-ATTR_NAME = "name"
-ATTR_SECTION = "section"
-ATTR_IP = "ip"
+# Modbus register addresses
+REG_TOTAL_ENERGY_START = 30529  # kWh (scaled x 1000 → Wh)
+REG_CURRENT_POWER = 30775       # Watts AC power output
 
-TOPIC_BASE = "sma/inverters"
-TOPIC_APP = "sma/app"
-
-PRIORITY_IMMEDIATE = 0
-PRIORITY_INTERVAL = 1
+# Modbus settings
+MODBUS_TIMEOUT = 10  # seconds
