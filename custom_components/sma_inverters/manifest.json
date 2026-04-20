@@ -1,14 +1,16 @@
 {
   "domain": "sma_inverters",
   "name": "SMA Inverters",
-  "version": "1.0.0",
+  "codeowners": [],
+  "config_flow": true,
   "documentation": "https://github.com/example/sma_inverters",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/example/sma_inverters/issues",
   "requirements": [
     "pymodbus>=3.6.8"
   ],
-  "config_flow": true,
-  "iot_class": "local_polling",
-  "codeowners": [],
-  "loggers": ["sma_inverters"]
+  "loggers": [
+    "sma_inverters"
+  ],
+  "version": "1.0.0"
 }

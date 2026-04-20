@@ -1,114 +1,237 @@
-"""Config flow for SMA Inverters integration."""
+"""Config flow for the SMA Inverters integration."""
+
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
+from .api import (
+    SmaInverterApiClient,
+    SmaInverterApiClientCommunicationError,
+    SmaInverterApiClientConnectionError,
+    SmaInverterApiClientError,
+)
 from .const import (
-    DOMAIN,
-    CONF_MQTT_HOST,
-    CONF_MQTT_PORT,
-    CONF_MQTT_USER,
-    CONF_MQTT_PASS,
-    CONF_READ_INTERVAL,
-    CONF_WRITE_INTERVAL,
     CONF_INVERTERS,
-    DEFAULT_MQTT_PORT,
-    DEFAULT_READ_INTERVAL,
-    DEFAULT_WRITE_INTERVAL,
+    CONF_INVERTER_HOST,
+    CONF_INVERTER_NAME,
+    CONF_INVERTER_PORT,
+    CONF_INVERTER_SECTION,
+    CONF_INVERTER_SLAVE_ID,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SLAVE_ID,
+    DOMAIN,
+    LOGGER,
 )
 
-_LOGGER = logging.getLogger(__name__)
+# ---------------------------------------------------------------------------
+# Step schemas
+# ---------------------------------------------------------------------------
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
+_GLOBAL_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_MQTT_HOST): str,
-        vol.Optional(CONF_MQTT_PORT, default=DEFAULT_MQTT_PORT): int,
-        vol.Optional(CONF_MQTT_USER, default=""): str,
-        vol.Optional(CONF_MQTT_PASS, default=""): str,
-        vol.Optional(CONF_READ_INTERVAL, default=DEFAULT_READ_INTERVAL): int,
-        vol.Optional(CONF_WRITE_INTERVAL, default=DEFAULT_WRITE_INTERVAL): int,
+        vol.Optional(
+            CONF_SCAN_INTERVAL,
+            default=DEFAULT_SCAN_INTERVAL,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=10,
+                max=3600,
+                step=10,
+                unit_of_measurement="s",
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
+    }
+)
+
+_INVERTER_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_INVERTER_NAME): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT),
+        ),
+        vol.Optional(CONF_INVERTER_SECTION, default=""): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT),
+        ),
+        vol.Required(CONF_INVERTER_HOST): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT),
+        ),
+        vol.Optional(
+            CONF_INVERTER_PORT,
+            default=DEFAULT_PORT,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1,
+                max=65535,
+                step=1,
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
+        vol.Optional(
+            CONF_INVERTER_SLAVE_ID,
+            default=DEFAULT_SLAVE_ID,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1,
+                max=247,
+                step=1,
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
     }
 )
 
 
 class SmaInvertersConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for SMA Inverters."""
+    """Handle a config flow for SMA Inverters.
+
+    Step 1 (``user``): global settings (scan interval).
+    Step 2 (``inverter``): details for the first (or only) inverter,
+        with live Modbus connection validation.
+    """
 
     VERSION = 1
 
     def __init__(self) -> None:
-        """Initialize the config flow."""
-        self._data: dict[str, Any] = {}
+        """Initialise the config flow."""
+        self._data: dict[str, Any] = {CONF_INVERTERS: []}
+
+    # ------------------------------------------------------------------
+    # Step 1 – global settings
+    # ------------------------------------------------------------------
 
     async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle the initial step."""
-        errors: dict[str, str] = {}
-
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Handle the initial step (global settings)."""
         if user_input is not None:
-            self._data.update(user_input)
-            self._data.setdefault(CONF_INVERTERS, [])
-            return self.async_create_entry(
-                title=f"SMA Inverters ({user_input[CONF_MQTT_HOST]})",
-                data=self._data,
-            )
+            self._data[CONF_SCAN_INTERVAL] = int(user_input[CONF_SCAN_INTERVAL])
+            return await self.async_step_inverter()
 
         return self.async_show_form(
             step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
-            errors=errors,
+            data_schema=_GLOBAL_SCHEMA,
         )
 
-    @staticmethod
-    @callback
-    def async_get_options_flow(
-        config_entry: config_entries.ConfigEntry,
-    ) -> SmaInvertersOptionsFlow:
-        """Return the options flow."""
-        return SmaInvertersOptionsFlow(config_entry)
+    # ------------------------------------------------------------------
+    # Step 2 – first inverter details + connection test
+    # ------------------------------------------------------------------
 
-
-class SmaInvertersOptionsFlow(config_entries.OptionsFlow):
-    """Handle options flow for SMA Inverters."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self._config_entry = config_entry
-
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Manage the options."""
+    async def async_step_inverter(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Handle inverter configuration step with Modbus connection test."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            host: str = user_input[CONF_INVERTER_HOST].strip()
+            port: int = int(user_input[CONF_INVERTER_PORT])
+            slave_id: int = int(user_input[CONF_INVERTER_SLAVE_ID])
 
-        current = self._config_entry.data
+            try:
+                await self._test_connection(host=host, port=port, slave_id=slave_id)
+            except SmaInverterApiClientConnectionError as exc:
+                LOGGER.warning("Connection test failed: %s", exc)
+                errors["base"] = "connection"
+            except SmaInverterApiClientCommunicationError as exc:
+                LOGGER.error("Communication error during connection test: %s", exc)
+                errors["base"] = "communication"
+            except SmaInverterApiClientError as exc:
+                LOGGER.exception("Unexpected error during connection test: %s", exc)
+                errors["base"] = "unknown"
+            else:
+                inv_cfg: dict[str, Any] = {
+                    CONF_INVERTER_NAME: user_input[CONF_INVERTER_NAME].strip(),
+                    CONF_INVERTER_SECTION: user_input.get(
+                        CONF_INVERTER_SECTION, ""
+                    ).strip(),
+                    CONF_INVERTER_HOST: host,
+                    CONF_INVERTER_PORT: port,
+                    CONF_INVERTER_SLAVE_ID: slave_id,
+                }
+                self._data[CONF_INVERTERS].append(inv_cfg)
+
+                title = f"SMA Inverters – {host}"
+                return self.async_create_entry(title=title, data=self._data)
+
+        return self.async_show_form(
+            step_id="inverter",
+            data_schema=_INVERTER_SCHEMA,
+            errors=errors,
+        )
+
+    # ------------------------------------------------------------------
+    # Options flow
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> SmaInvertersOptionsFlow:
+        """Return the options flow handler."""
+        return SmaInvertersOptionsFlow()
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    async def _test_connection(
+        self,
+        host: str,
+        port: int,
+        slave_id: int,
+    ) -> None:
+        """Open a Modbus TCP connection to verify the inverter is reachable."""
+        client = SmaInverterApiClient(host=host, port=port, slave_id=slave_id)
+        await client.async_test_connection()
+
+
+class SmaInvertersOptionsFlow(config_entries.OptionsFlow):
+    """Handle options for the SMA Inverters integration.
+
+    Currently exposes the global scan interval so users can tune the
+    poll frequency without re-adding the integration.
+    """
+
+    async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(
+                data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])}
+            )
+
+        current_interval: int = self.config_entry.data.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
 
         options_schema = vol.Schema(
             {
                 vol.Optional(
-                    CONF_READ_INTERVAL,
-                    default=current.get(CONF_READ_INTERVAL, DEFAULT_READ_INTERVAL),
-                ): int,
-                vol.Optional(
-                    CONF_WRITE_INTERVAL,
-                    default=current.get(CONF_WRITE_INTERVAL, DEFAULT_WRITE_INTERVAL),
-                ): int,
+                    CONF_SCAN_INTERVAL,
+                    default=current_interval,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10,
+                        max=3600,
+                        step=10,
+                        unit_of_measurement="s",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 
         return self.async_show_form(
             step_id="init",
             data_schema=options_schema,
-            errors=errors,
         )
